@@ -1,558 +1,714 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-from datetime import datetime, timezone
+import json
 import os
-import pytz
+from datetime import datetime, date, time
+from streamlit_autorefresh import st_autorefresh
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(page_title="IDP GOT TALENT", page_icon="🎤", layout="wide")
+# ============== DATA FILE ==============
+DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voting_data.json")
 
-# ---------------- CSS ----------------
+def load_data():
+    """Load all data from JSON file"""
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def save_data():
+    """Save all data to JSON file"""
+    data = {
+        "contestants": st.session_state.contestants,
+        "votes": st.session_state.votes,
+        "allowed_voters": st.session_state.allowed_voters,
+        "voted_emails": list(st.session_state.voted_emails),
+        "voter_picks": st.session_state.voter_picks,
+        "vote_timestamps": st.session_state.vote_timestamps,
+        "voting_open": st.session_state.voting_open,
+        "schedule_start": st.session_state.schedule_start,
+        "schedule_end": st.session_state.schedule_end,
+        "app_title": st.session_state.app_title,
+        "app_subtitle": st.session_state.app_subtitle,
+    }
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_contestant_label(c):
+    """Get display label for a contestant dict"""
+    num = str(c.get("Number", ""))
+    name = c.get("Name", "")
+    if name:
+        return f"#{num} - {name}"
+    return f"#{num}"
+
+st.set_page_config(page_title="Office Talent Show - Voting", layout="centered", initial_sidebar_state="collapsed")
+
 st.markdown("""
 <style>
-#MainMenu {visibility:hidden;}
-footer {visibility:hidden;}
-header {visibility:hidden;}
-a[href*="github"] {display:none !important;}
-
-html, body, .stApp {
-    background:#0a0a0a;
-    color:white;
-    font-family:Segoe UI;
-}
-
-.block-container {max-width:1100px;}
-
-.header {
-    padding:20px;
-    border-radius:18px;
-    text-align:center;
-    margin-bottom:25px;
-}
-
-@keyframes glow {
-    0% { text-shadow: 0 0 5px #ff003c; }
-    50% { text-shadow: 0 0 20px #ff003c; }
-    100% { text-shadow: 0 0 5px #ff003c; }
-}
-.animated-title {animation: glow 2s infinite alternate;}
-
-.credit {
-    position: fixed;
-    bottom: 12px;
-    width: 100%;
+.title {
+    color: #FF4B4B;
+    font-size: 36px;
+    font-weight: bold;
     text-align: center;
+    animation: popIn 0.8s cubic-bezier(0.68, -0.55, 0.27, 1.55) both;
+}
+@keyframes popIn {
+    0% { transform: scale(0.3); opacity: 0; }
+    50% { transform: scale(1.15); opacity: 0.9; }
+    70% { transform: scale(0.95); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+.subtitle {
+    color: #555;
+    font-size: 18px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+.stButton > button {
+    background-color: #FF4B4B;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 40px;
+    font-size: 18px;
+}
+.stButton > button:hover {
+    background-color: #cc0000;
+    color: white;
+}
+.small-link {
+    font-size: 11px;
+    color: #999;
+    text-decoration: none;
+    padding: 2px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    float: right;
+}
+.small-link:hover {
+    color: #FF4B4B;
+    border-color: #FF4B4B;
+}
+[data-testid="collapsedControl"] { display: none; }
+section[data-testid="stSidebar"] { display: none; }
+
+/* ===== PODIUM ===== */
+.podium-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 12px;
+    margin: 30px auto 20px;
+    max-width: 600px;
+}
+.podium-block {
+    text-align: center;
+    border-radius: 16px 16px 0 0;
+    padding: 18px 14px 14px;
+    min-width: 140px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    position: relative;
+    transition: transform 0.3s;
+}
+.podium-block:hover { transform: translateY(-6px); }
+.podium-gold {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    height: 180px;
+    order: 2;
+}
+.podium-silver {
+    background: linear-gradient(135deg, #C0C0C0, #A8A8A8);
+    height: 180px;
+    order: 1;
+}
+.podium-bronze {
+    background: linear-gradient(135deg, #CD7F32, #A0522D);
+    height: 180px;
+    order: 3;
+}
+.podium-rank {
+    font-size: 38px;
+    margin-bottom: 4px;
+}
+.podium-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+    word-break: break-word;
+}
+.podium-votes {
+    font-size: 22px;
+    font-weight: 800;
+    color: #fff;
+    margin-top: 6px;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+}
+
+/* ===== ANIMATED BARS ===== */
+.results-bar-container {
+    margin: 8px 0;
+    padding: 10px 16px;
+    background: #1e1e2f;
+    border-radius: 12px;
+}
+.results-bar-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.results-bar-name {
+    color: #fff;
+    font-weight: 600;
+    font-size: 15px;
+}
+.results-bar-count {
+    color: #aaa;
+    font-size: 14px;
+}
+.results-bar-track {
+    background: #2a2a3d;
+    border-radius: 8px;
+    height: 22px;
+    overflow: hidden;
+}
+.results-bar-fill {
+    height: 100%;
+    border-radius: 8px;
+    background: linear-gradient(90deg, #FF4B4B, #FF8C00, #FFD700);
+    transition: width 1s ease;
+    animation: bar-glow 2s ease-in-out infinite alternate;
+}
+@keyframes bar-glow {
+    0% { box-shadow: 0 0 6px rgba(255,75,75,0.4); }
+    100% { box-shadow: 0 0 14px rgba(255,215,0,0.6); }
+}
+
+.live-badge {
+    display: inline-block;
+    background: #FF4B4B;
+    color: white;
+    padding: 3px 12px;
+    border-radius: 20px;
     font-size: 13px;
-    color:#ccc;
+    font-weight: 600;
+    animation: pulse-badge 1.5s infinite;
+    margin-left: 10px;
 }
-.credit span { color:#ff003c; font-weight:600; }
-
-.podium {
-    background:#151515;
-    padding:15px;
-    border-radius:12px;
-    text-align:center;
-}
-
-@keyframes winnerPulse {
-  0% { box-shadow: 0 0 5px #ff003c; }
-  50% { box-shadow: 0 0 30px #ff003c; }
-  100% { box-shadow: 0 0 5px #ff003c; }
-}
-
-.winner-card{
-    background:#1b1b1b;
-    padding:25px;
-    border-radius:18px;
-    text-align:center;
-    animation:winnerPulse 2s infinite;
-    margin-bottom:20px;
-}
-
-.bar-wrap{
-    background:#1a1a1a;
-    border-radius:12px;
-    margin:8px 0;
-    padding:6px;
-}
-
-.bar{
-    height:22px;
-    border-radius:10px;
-    background:linear-gradient(90deg,#ff003c,#ff6a00);
-    box-shadow:0 0 12px #ff003c;
+@keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
-st.markdown("""
-<div class='header'>
-    <img src="https://images.ctfassets.net/8bbwomjfix8m/55AePSl50ZnwVBce2lROSW/ff063dcfbec1eb176c59e2179eef57e2/idp-logo.svg" width="220" style="display: block; margin: 0 auto;">
-    <h1 class='animated-title'>🌟 𝑰𝑫𝑷 𝑮𝑶𝑻 𝑻𝑨𝑳𝑬𝑵𝑻 2026 🌟</h1>
-</div>
-""", unsafe_allow_html=True)
+# ============== ADMIN PASSWORD ==============
+ADMIN_PASSWORD = "Admin123"
+MAX_VOTES_PER_PERSON = 3
 
-# ---------------- DATABASE ----------------
-conn = sqlite3.connect("idp_votes.db", check_same_thread=False, timeout=30)
-c = conn.cursor()
-# Improve concurrency for small multi-writer workloads
-c.execute("PRAGMA journal_mode=WAL")
+# --- Load saved data ---
+saved = load_data()
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS votes(
-email TEXT PRIMARY KEY,
-voter_name TEXT,
-contestant INTEGER,
-time TEXT
-)
-""")
+if "contestants" not in st.session_state:
+    st.session_state.contestants = saved["contestants"] if saved and isinstance(saved.get("contestants", None), list) and len(saved.get("contestants", [])) > 0 and isinstance(saved["contestants"][0], dict) else []
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS settings(
-id INTEGER PRIMARY KEY,
-voting_open INTEGER
-)
-""")
+if "votes" not in st.session_state:
+    st.session_state.votes = saved["votes"] if saved and "votes" in saved else {}
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
+if "allowed_voters" not in st.session_state:
+    st.session_state.allowed_voters = saved["allowed_voters"] if saved else []
+if "voter_logged_in" not in st.session_state:
+    st.session_state.voter_logged_in = False
+if "voter_name" not in st.session_state:
+    st.session_state.voter_name = ""
+if "voter_email" not in st.session_state:
+    st.session_state.voter_email = ""
+if "voted_emails" not in st.session_state:
+    st.session_state.voted_emails = set(saved["voted_emails"]) if saved and "voted_emails" in saved else set()
+if "voter_picks" not in st.session_state:
+    st.session_state.voter_picks = saved["voter_picks"] if saved and "voter_picks" in saved else {}
+if "vote_timestamps" not in st.session_state:
+    st.session_state.vote_timestamps = saved["vote_timestamps"] if saved and "vote_timestamps" in saved else {}
+if "voting_open" not in st.session_state:
+    st.session_state.voting_open = saved["voting_open"] if saved and "voting_open" in saved else True
+if "schedule_start" not in st.session_state:
+    st.session_state.schedule_start = saved["schedule_start"] if saved and "schedule_start" in saved else ""
+if "schedule_end" not in st.session_state:
+    st.session_state.schedule_end = saved["schedule_end"] if saved and "schedule_end" in saved else ""
+if "app_title" not in st.session_state:
+    st.session_state.app_title = saved["app_title"] if saved and "app_title" in saved else "🎤 IDP Got Talent 💃"
+if "app_subtitle" not in st.session_state:
+    st.session_state.app_subtitle = saved["app_subtitle"] if saved and "app_subtitle" in saved else "Vote for your favourite performers!"
 
-c.execute("INSERT OR IGNORE INTO settings(id,voting_open) VALUES(1,1)")
-conn.commit()
+# Always refresh votes, contestants, voted_emails and voter_picks from JSON for real-time updates
+if saved:
+    if "votes" in saved:
+        st.session_state.votes = saved["votes"]
+    if isinstance(saved.get("contestants", None), list) and len(saved.get("contestants", [])) > 0 and isinstance(saved["contestants"][0], dict):
+        st.session_state.contestants = saved["contestants"]
+    if "voted_emails" in saved:
+        st.session_state.voted_emails = set(saved["voted_emails"])
+    if "allowed_voters" in saved:
+        st.session_state.allowed_voters = saved["allowed_voters"]
+    if "voter_picks" in saved:
+        st.session_state.voter_picks = saved["voter_picks"]
+    if "vote_timestamps" in saved:
+        st.session_state.vote_timestamps = saved["vote_timestamps"]
+    if "voting_open" in saved:
+        st.session_state.voting_open = saved["voting_open"]
+    if "schedule_start" in saved:
+        st.session_state.schedule_start = saved["schedule_start"]
+    if "schedule_end" in saved:
+        st.session_state.schedule_end = saved["schedule_end"]
+    if "app_title" in saved:
+        st.session_state.app_title = saved["app_title"]
+    if "app_subtitle" in saved:
+        st.session_state.app_subtitle = saved["app_subtitle"]
 
-# Add optional columns for voting window if missing
-try:
-    c.execute("ALTER TABLE settings ADD COLUMN start_time TEXT")
-except Exception:
-    pass
-try:
-    c.execute("ALTER TABLE settings ADD COLUMN end_time TEXT")
-except Exception:
-    pass
-conn.commit()
-
-# Contestants table (number, name, optional image path)
-c.execute("""
-CREATE TABLE IF NOT EXISTS contestants(
-number INTEGER PRIMARY KEY,
-name TEXT,
-image TEXT
-)
-""")
-
-# Audit table for tracking changes
-c.execute("""
-CREATE TABLE IF NOT EXISTS audit(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-email TEXT,
-old_contestant INTEGER,
-new_contestant INTEGER,
-action TEXT,
-time TEXT
-)
-""")
-conn.commit()
-
-# Admin password comes from environment (override default in production)
-ADMIN_PWD = os.environ.get("IDP_ADMIN_PWD", "admin123")
-
-# ---------------- FUNCTIONS ----------------
-def is_voting_open():
-    c.execute("SELECT voting_open, start_time, end_time FROM settings WHERE id=1")
-    row = c.fetchone()
-    if not row:
-        return False
-    voting_flag, start_s, end_s = row
-    
-    # DEBUG: Show what we're checking
-    # st.write(f"DEBUG - voting_flag: {voting_flag}, start_s: {start_s}, end_s: {end_s}")
-    
-    if voting_flag != 1:
-        return False
-    
-    # If no time window set, just check voting_flag
-    if not start_s and not end_s:
-        return True
-    
+# --- Auto schedule check (runs on every page load / refresh) ---
+now = datetime.now()
+sched_start = st.session_state.schedule_start
+sched_end = st.session_state.schedule_end
+if sched_start and sched_end:
     try:
-        # Compare times in UTC
-        now = datetime.now(timezone.utc)
-        # st.write(f"DEBUG - Current time (UTC): {now}")
-        
-        if start_s:
+        start_dt = datetime.fromisoformat(sched_start)
+        end_dt = datetime.fromisoformat(sched_end)
+        if start_dt <= now <= end_dt:
+            if not st.session_state.voting_open:
+                st.session_state.voting_open = True
+                save_data()
+        elif now < start_dt:
+            if st.session_state.voting_open:
+                st.session_state.voting_open = False
+                save_data()
+        elif now > end_dt:
+            if st.session_state.voting_open:
+                st.session_state.voting_open = False
+            # Auto clear schedule after end time
+            st.session_state.schedule_start = ""
+            st.session_state.schedule_end = ""
+            save_data()
+    except:
+        pass
+
+# --- Page from query params ---
+params = st.query_params
+current_page = params.get("page", "voting")
+
+# ============================================================
+#                     VOTING PAGE
+# ============================================================
+if current_page == "voting":
+
+    contestants = st.session_state.contestants
+    contestant_labels = [get_contestant_label(c) for c in contestants]
+
+    st.markdown('<div style="text-align:center;"><img src="https://images.ctfassets.net/8bbwomjfix8m/55AePSl50ZnwVBce2lROSW/ff063dcfbec1eb176c59e2179eef57e2/idp-logo.svg" width="180" style="margin-bottom:10px;"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="title">{st.session_state.app_title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="subtitle">{st.session_state.app_subtitle}</div>', unsafe_allow_html=True)
+
+    voting_allowed = st.session_state.voting_open
+
+    # --- Voter Login ---
+    if not voting_allowed:
+        if st.session_state.schedule_start and st.session_state.schedule_end:
             try:
-                st_dt = datetime.fromisoformat(start_s)
-                if st_dt.tzinfo is None:
-                    st_dt = st_dt.replace(tzinfo=timezone.utc)
+                s_dt = datetime.fromisoformat(st.session_state.schedule_start)
+                e_dt = datetime.fromisoformat(st.session_state.schedule_end)
+                now_check = datetime.now()
+                if now_check < s_dt:
+                    st.warning(f"⏳ Voting will open on **{s_dt.strftime('%d %b %Y, %I:%M %p')}**")
+                elif now_check > e_dt:
+                    st.warning(f"⏸️ Voting ended on **{e_dt.strftime('%d %b %Y, %I:%M %p')}**")
                 else:
-                    st_dt = st_dt.astimezone(timezone.utc)
-                # st.write(f"DEBUG - Start time (UTC): {st_dt}, Now > Start: {now > st_dt}")
-                if now < st_dt:
-                    return False
-            except Exception as e:
-                # st.write(f"DEBUG - Error parsing start_s: {e}")
-                pass
-        
-        if end_s:
-            try:
-                end_dt = datetime.fromisoformat(end_s)
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                    st.warning("⏸️ Voting is currently closed.")
+            except:
+                st.warning("⏸️ Voting is currently closed. Please check back later.")
+        else:
+            st.warning("⏸️ Voting is currently closed. Please check back later.")
+    elif not st.session_state.voter_logged_in:
+        if len(st.session_state.allowed_voters) == 0:
+            st.warning("Voting is not open yet. Please check back later.")
+        else:
+            login_email = st.text_input("📧 Enter Your Email")
+
+            if st.button("Continue"):
+                if not login_email.strip():
+                    st.warning("Please enter your Email!")
                 else:
-                    end_dt = end_dt.astimezone(timezone.utc)
-                # st.write(f"DEBUG - End time (UTC): {end_dt}, Now < End: {now < end_dt}")
-                if now > end_dt:
-                    return False
-            except Exception as e:
-                # st.write(f"DEBUG - Error parsing end_s: {e}")
-                pass
-        
-        return True
-    except Exception as e:
-        # st.write(f"DEBUG - Unexpected error in is_voting_open: {e}")
-        return False
-
-def set_voting(v):
-    c.execute("UPDATE settings SET voting_open=?", (v,))
-    conn.commit()
-
-def add_vote(email,name,cno):
-    try:
-        # read previous contestant for audit
-        c.execute("SELECT contestant FROM votes WHERE email=?", (email,))
-        prev = c.fetchone()
-        prev_c = prev[0] if prev else None
-
-        c.execute("""
-        INSERT INTO votes(email,voter_name,contestant,time)
-        VALUES(?,?,?,?)
-        ON CONFLICT(email) DO UPDATE SET
-            voter_name=excluded.voter_name,
-            contestant=excluded.contestant,
-            time=excluded.time
-        """, (email, name, cno, datetime.utcnow().isoformat()))
-
-        # write audit record
-        c.execute("INSERT INTO audit(email,old_contestant,new_contestant,action,time) VALUES(?,?,?,?,?)",
-                  (email, prev_c, cno, 'vote', datetime.utcnow().isoformat()))
-        conn.commit()
-    except Exception as e:
-        print("Error writing vote:", e)
-        raise
-
-def format_iso_to_display(s):
-    """Convert ISO datetime string to 'DD-MM-YYYY HH:MM A.M/P.M' in local timezone."""
-    if s is None:
-        return ""
-    try:
-        dt = datetime.fromisoformat(s)
-    except Exception:
-        try:
-            # fallback parse
-            dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f")
-        except Exception:
-            return s
-    # assume UTC if naive
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc).astimezone()
+                    matched_voter = None
+                    for v in st.session_state.allowed_voters:
+                        if v["Email"].strip().lower() == login_email.strip().lower():
+                            matched_voter = v
+                            break
+                    if matched_voter:
+                        st.session_state.voter_logged_in = True
+                        st.session_state.voter_name = matched_voter["Name"].strip()
+                        st.session_state.voter_email = login_email.strip().lower()
+                        st.rerun()
+                    else:
+                        st.error("❌ Your Email not found in the voter list. Contact Admin.")
     else:
-        dt = dt.astimezone()
-    out = dt.strftime("%d-%m-%Y %I:%M %p")
-    out = out.replace("AM", "A.M").replace("PM", "P.M")
-    return out
+        st.success(f"✅ Welcome, **{st.session_state.voter_name}**! ({st.session_state.voter_email})")
 
-def import_contestants_from_df(df):
-    # df expected to have 'number' and 'name' columns, optional 'image'
-    for _, row in df.iterrows():
-        num = int(row['number'])
-        name = str(row.get('name', f'Contestant {num}'))
-        img = row.get('image', None)
-        c.execute("INSERT OR REPLACE INTO contestants(number,name,image) VALUES(?,?,?)", (num, name, img))
-    conn.commit()
+        st.markdown("---")
 
-def load_contestants():
-    df = pd.read_sql("SELECT number,name,image FROM contestants ORDER BY number", conn)
-    # return list of tuples (number,name,image)
-    return df.to_dict(orient='records')
+        # Check if already voted
+        already_voted = st.session_state.voter_email in st.session_state.voted_emails
 
-def results():
-    return pd.read_sql("SELECT contestant,COUNT(*) Votes FROM votes GROUP BY contestant ORDER BY Votes DESC",conn)
-
-def all_votes():
-    # ISO timestamps sort correctly as strings; order most recent first
-    return pd.read_sql("SELECT voter_name,email,contestant,time FROM votes ORDER BY time DESC", conn)
-
-def reset_votes():
-    # count for audit
-    c.execute("SELECT COUNT(*) FROM votes")
-    cnt = c.fetchone()[0]
-    c.execute("DELETE FROM votes")
-    c.execute("INSERT INTO audit(email,old_contestant,new_contestant,action,time) VALUES(?,?,?,?,?)",
-              (None, None, None, f'reset_{cnt}', datetime.utcnow().isoformat()))
-    conn.commit()
-
-# ---------------- SIDEBAR ----------------
-menu = st.sidebar.selectbox("Mode",["Public Voting","Admin Panel"])
-
-# ================= PUBLIC =================
-if menu=="Public Voting":
-
-    if not is_voting_open():
-        st.warning("Voting Closed")
-        st.stop()
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    contestants = load_contestants()
-    with st.form("vote_form"):
-        name = st.text_input("Your Full Name")
-        email = st.text_input("Official Email (@idp.com)")
-        if contestants:
-            opts = [f"{c['number']} - {c['name']}" for c in contestants]
-            sel = st.selectbox("Choose Contestant", opts)
-            cont = int(sel.split(" - ")[0])
-            # show image if available
-            sel_idx = next((i for i,c in enumerate(contestants) if c['number']==cont), None)
-            if sel_idx is not None and contestants[sel_idx].get('image') and os.path.exists(contestants[sel_idx]['image']):
-                st.image(contestants[sel_idx]['image'], width=240)
+        if already_voted:
+            my_picks = st.session_state.voter_picks.get(st.session_state.voter_email, [])
+            if my_picks:
+                st.success(f"🎉 Thanks {st.session_state.voter_name}! You voted for: {', '.join(my_picks)}")
+            else:
+                st.info("✅ You have already voted. Thank you!")
+        elif len(contestants) == 0:
+            st.info("No contestants added yet.")
         else:
-            cont = st.number_input("Contestant Number", 1, 30)
-        submitted = st.form_submit_button("Submit Vote")
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"<p style='font-size:20px; font-weight:600; margin-bottom:4px;'>🗳️ Select your Top {MAX_VOTES_PER_PERSON} performers</p>", unsafe_allow_html=True)
 
-    if st.session_state.get("submitted", False):
-        st.warning("You have already voted.")
-        st.stop()
+            selected = st.multiselect(
+                "Choose your favourites:",
+                options=contestant_labels,
+                max_selections=MAX_VOTES_PER_PERSON,
+                key="vote_select"
+            )
 
-    if submitted:
+            if st.button("✅ Submit"):
+                if len(selected) == 0:
+                    st.warning("Please select at least 1 performer!")
+                elif len(selected) > MAX_VOTES_PER_PERSON:
+                    st.error(f"You can vote for maximum {MAX_VOTES_PER_PERSON} performers!")
+                else:
+                    # Record votes
+                    for pick in selected:
+                        st.session_state.votes[pick] = st.session_state.votes.get(pick, 0) + 1
+                    st.session_state.voted_emails.add(st.session_state.voter_email)
+                    st.session_state.voter_picks[st.session_state.voter_email] = selected
+                    st.session_state.vote_timestamps[st.session_state.voter_email] = datetime.now().strftime("%d %b %Y, %I:%M:%S %p")
+                    save_data()
+                    st.rerun()
 
-        if not email or not email.lower().endswith("@idp.com"):
-            st.error("Please use official @idp.com email")
+    # Show Live Results only after voting
+    if st.session_state.voter_logged_in and st.session_state.voter_email in st.session_state.voted_emails:
+        st.markdown("---")
+        st.markdown('## Live Results <span class="live-badge">● LIVE</span>', unsafe_allow_html=True)
 
-        elif name.strip() == "":
-            st.error("Name required")
-
+        total_votes = sum(st.session_state.votes.values())
+        if total_votes == 0:
+            st.info("No votes yet.")
         else:
-            # check existing vote and show info if found
-            c.execute("SELECT contestant, time FROM votes WHERE email=?", (email.lower(),))
-            prev = c.fetchone()
-            if prev:
-                prev_cont, prev_time = prev[0], prev[1]
-                try:
-                    st.info(f"Previous vote found: Contestant {int(prev_cont)} at {format_iso_to_display(prev_time)} - it will be replaced.")
-                except Exception:
-                    st.info("Previous vote found - it will be replaced.")
-            
-            add_vote(email.lower(), name, int(cont))
-            st.session_state.submitted = True
-            st.success(f"Thanks {name}! Your vote has been recorded.")
-            st.balloons()
-            st.stop()
+            # Sort by votes descending
+            sorted_contestants = sorted(contestants, key=lambda c: st.session_state.votes.get(get_contestant_label(c), 0), reverse=True)
+            sorted_labels = [get_contestant_label(c) for c in sorted_contestants]
+            sorted_counts = [st.session_state.votes.get(lbl, 0) for lbl in sorted_labels]
 
-# ================= ADMIN =================
-if menu=="Admin Panel":
+            # === PODIUM (Top 3 with votes > 0 only) ===
+            medal_emoji = ["🥇", "🥈", "🥉"]
+            podium_class = ["podium-gold", "podium-silver", "podium-bronze"]
+            # Filter: only contestants who have at least 1 vote
+            podium_candidates = [(lbl, cnt) for lbl, cnt in zip(sorted_labels, sorted_counts) if cnt > 0]
+            top3 = min(3, len(podium_candidates))
 
-    if 'admin_logged_in' not in st.session_state:
-        st.session_state.admin_logged_in = False
-    
+            if top3 > 0:
+                podium_html = '<div class="podium-container">'
+                for i in range(top3):
+                    lbl, cnt = podium_candidates[i]
+                    podium_html += f'''
+                    <div class="podium-block {podium_class[i]}">
+                        <div class="podium-rank">{medal_emoji[i]}</div>
+                        <div class="podium-name">{lbl}</div>
+                        <div class="podium-votes">{cnt} votes</div>
+                    </div>'''
+                podium_html += '</div>'
+                st.markdown(podium_html, unsafe_allow_html=True)
+
+            st.markdown("")
+            st.markdown("### Top 5 Scoreboard")
+
+            # === ANIMATED BARS (Top 5 only) ===
+            top5_labels = sorted_labels[:5]
+            top5_counts = sorted_counts[:5]
+            max_count = max(top5_counts) if top5_counts else 1
+            rank_icons = {0: "🥇", 1: "🥈", 2: "🥉"}
+            for i, (lbl, cnt) in enumerate(zip(top5_labels, top5_counts)):
+                pct = int((cnt / max_count) * 100) if max_count > 0 else 0
+                pct_total = int((cnt / total_votes) * 100) if total_votes > 0 else 0
+                # Only show medal icon if they have votes
+                if cnt > 0:
+                    icon = rank_icons.get(i, f"#{i+1}")
+                else:
+                    icon = f"#{i+1}"
+                bar_html = f'''
+                <div class="results-bar-container">
+                    <div class="results-bar-header">
+                        <span class="results-bar-name">{icon} {lbl}</span>
+                        <span class="results-bar-count">{cnt} votes ({pct_total}%)</span>
+                    </div>
+                    <div class="results-bar-track">
+                        <div class="results-bar-fill" style="width: {pct}%;"></div>
+                    </div>
+                </div>'''
+                st.markdown(bar_html, unsafe_allow_html=True)
+
+            st.markdown(f"<p style='text-align:center; color:#888; margin-top:16px;'>🗳️ Total Votes Cast: <b>{total_votes}</b></p>", unsafe_allow_html=True)
+
+        # Auto-refresh every 5 seconds for real-time updates (smooth, no visible page reload)
+        st_autorefresh(interval=5000, limit=None, key="live_refresh")
+
+    # Auto-refresh for schedule auto-open/close (runs even when voting is closed)
+    if st.session_state.schedule_start and st.session_state.schedule_end:
+        st_autorefresh(interval=10000, limit=None, key="schedule_refresh")
+
+# ============================================================
+#                     ADMIN PANEL
+# ============================================================
+elif current_page == "admin":
+
+    # Tiny voting link on top-right
+    st.markdown('<a class="small-link" href="?page=voting" target="_self">🗳️ Voting</a>', unsafe_allow_html=True)
+
+    st.markdown('<div class="title">🔐 Admin Panel</div>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    # --- Login ---
     if not st.session_state.admin_logged_in:
-        pwd = st.text_input("Admin Password",type="password")
-        if pwd == ADMIN_PWD and pwd != "":
-            st.session_state.admin_logged_in = True
-            st.success("Login successful!")
-            st.rerun()
-        elif pwd != "" and pwd != ADMIN_PWD:
-            st.error("Wrong password")
-
-    if st.session_state.admin_logged_in:
-
-        r = results()
-        av = all_votes()
-
-        # -------- WINNER --------
-        if not r.empty:
-            top = r.iloc[0]
-            st.markdown(f"""
-            <div class='winner-card'>
-            <h2>🏆 CURRENT WINNER</h2>
-            <h1>Contestant #{int(top['contestant'])}</h1>
-            <h3>{top['Votes']} Votes</h3>
-            </div>
-            """, unsafe_allow_html=True)
-
-
-        # -------- GLOW BARS --------
-        st.subheader("🔥 Live Leaderboard")
-        if not r.empty:
-            maxv = r["Votes"].max()
-            for row in r.itertuples():
-                pct = int((row.Votes / maxv) * 100) if maxv > 0 else 0
-                st.markdown(f"""
-                <div>Contestant {int(row.contestant)} — {row.Votes} votes</div>
-                <div class='bar-wrap'>
-                    <div class='bar' style='width:{pct}%;'></div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # format times for display
-        if not av.empty and 'time' in av.columns:
-            av['time'] = av['time'].fillna('').astype(str).apply(format_iso_to_display)
-        st.markdown("<div class='card'>",unsafe_allow_html=True)
-        st.subheader("👥 Individual Votes")
-        st.dataframe(av,use_container_width=True)
-        st.markdown("</div>",unsafe_allow_html=True)
-
-        # --- Contestant management ---
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("🎭 Contestants")
-        conts = load_contestants()
-        if conts:
-            st.table(pd.DataFrame(conts))
-            # export
-            dfc = pd.DataFrame(conts)
-            csvc = dfc.to_csv(index=False).encode('utf-8')
-            jsonc = dfc.to_json(orient='records').encode('utf-8')
-            st.download_button("Export Contestants CSV", csvc, "contestants.csv", "text/csv")
-            st.download_button("Export Contestants JSON", jsonc, "contestants.json", "application/json")
-        else:
-            st.info("No contestants configured yet.")
-
-        up = st.file_uploader("Upload contestants CSV (columns: number,name,image)", type=['csv'])
-        if up is not None:
-            try:
-                dfu = pd.read_csv(up)
-                import_contestants_from_df(dfu)
-                st.success("Contestants imported")
+        pwd = st.text_input("Enter Admin Password", type="password")
+        if st.button("🔓 Login"):
+            if pwd == ADMIN_PASSWORD:
+                st.session_state.admin_logged_in = True
                 st.rerun()
-            except Exception as e:
-                st.error(f"Failed to import: {e}")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- Voting window controls ---
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("⏱ Voting Window")
-        # show current settings
-        c.execute("SELECT voting_open, start_time, end_time FROM settings WHERE id=1")
-        srow = c.fetchone()
-        if srow:
-            cur_flag, cur_start, cur_end = srow
-            st.write(f"Voting Enabled: {bool(cur_flag)}")
-            if cur_start:
-                st.write(f"Start: {format_iso_to_display(cur_start)}")
             else:
-                st.write(f"Start: Not set")
-            if cur_end:
-                st.write(f"End: {format_iso_to_display(cur_end)}")
-            else:
-                st.write(f"End: Not set")
-        
-        # DEBUG: Show voting status
-        voting_status = is_voting_open()
-        if voting_status:
-            st.success(f"✅ **Voting is OPEN** - Current time allows voting")
-        else:
-            st.error(f"❌ **Voting is CLOSED** - Current time does NOT allow voting")
+                st.error("Wrong password!")
+    else:
+        st.success("✅ Logged in as Admin")
 
-        st.write("**Set Voting Window**")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("📅 **Start**")
-            start_date = st.date_input("Start Date", value=None, key="start_date", format="DD/MM/YYYY")
-            c1, c2, c3 = st.columns([1, 1, 1])
-            with c1:
-                start_h = st.number_input("Hour (1-12)", min_value=1, max_value=12, value=10, key="start_h")
-            with c2:
-                start_m = st.number_input("Min", min_value=0, max_value=59, value=0, key="start_m")
-            with c3:
-                start_ampm = st.selectbox("AM/PM", ["A.M", "P.M"], key="start_ampm")
-        
-        with col2:
-            st.write("📅 **End**")
-            end_date = st.date_input("End Date", value=None, key="end_date", format="DD/MM/YYYY")
-            c1, c2, c3 = st.columns([1, 1, 1])
-            with c1:
-                end_h = st.number_input("Hour (1-12)", min_value=1, max_value=12, value=6, key="end_h")
-            with c2:
-                end_m = st.number_input("Min", min_value=0, max_value=59, value=0, key="end_m")
-            with c3:
-                end_ampm = st.selectbox("AM/PM", ["A.M", "P.M"], key="end_ampm")
-        
-        if st.button("Set Voting Window", use_container_width=True):
-            try:
-                start_iso = None
-                end_iso = None
-                kolkata_tz = pytz.timezone('Asia/Kolkata')
-                
-                if start_date:
-                    # Convert 12-hour to 24-hour format
-                    hour_24 = int(start_h) % 12
-                    if start_ampm == "P.M":
-                        hour_24 += 12
-                    start_dt = datetime.combine(start_date, datetime.min.time().replace(hour=hour_24, minute=int(start_m)))
-                    start_dt = kolkata_tz.localize(start_dt)
-                    start_iso = start_dt.isoformat()
-                
-                if end_date:
-                    # Convert 12-hour to 24-hour format
-                    hour_24 = int(end_h) % 12
-                    if end_ampm == "P.M":
-                        hour_24 += 12
-                    end_dt = datetime.combine(end_date, datetime.min.time().replace(hour=hour_24, minute=int(end_m)))
-                    end_dt = kolkata_tz.localize(end_dt)
-                    end_iso = end_dt.isoformat()
-                
-                c.execute("UPDATE settings SET start_time=?, end_time=? WHERE id=1", (start_iso, end_iso))
-                conn.commit()
-                st.success("Voting window updated (UTC+05:30 Asia/Kolkata)")
-            except Exception as e:
-                st.error(f"Error setting voting window: {e}")
-        
-        if st.button("🔄 Reset Voting Window", use_container_width=True):
-            c.execute("UPDATE settings SET start_time=NULL, end_time=NULL WHERE id=1")
-            conn.commit()
-            st.success("Voting window reset - timing restrictions cleared")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.divider()
-        
-        # Download CSV
-        if not av.empty:
-            csv = av.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV",csv,"IDP_VOTES.csv","text/csv", use_container_width=True)
-
-        # Close/Open Voting
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("❌ Close Voting", use_container_width=True): 
-                set_voting(0)
-                st.success("Voting closed!")
-        with col2:
-            if st.button("✅ Open Voting", use_container_width=True): 
-                # When opening voting, clear any time restrictions
-                c.execute("UPDATE settings SET voting_open=1, start_time=NULL, end_time=NULL WHERE id=1")
-                conn.commit()
-                st.success("Voting opened! (All time restrictions cleared)")
-
-        # Reset Votes / Refresh Leaderboard
-        col3, col4 = st.columns(2)
-        with col3:
-            if 'confirm_reset' not in st.session_state:
-                st.session_state['confirm_reset'] = False
-            if st.session_state.get('confirm_reset'):
-                if st.button("⚠️ Confirm Reset Votes", use_container_width=True):
-                    reset_votes()
-                    st.session_state['confirm_reset'] = False
-                    st.success("All votes have been reset.")
-            else:
-                if st.button("🔄 Reset Votes", use_container_width=True):
-                    st.session_state['confirm_reset'] = True
-        with col4:
-            if st.button("📊 Refresh Leaderboard", use_container_width=True):
-                st.rerun()
-        
-        st.divider()
-        if st.button("🚪 Logout", use_container_width=True):
+        if st.button("🔒 Logout"):
             st.session_state.admin_logged_in = False
             st.rerun()
 
-# ---------------- CREDIT ----------------
-st.markdown("<div class='credit'>Built by <span>Kartik Singh</span></div>",unsafe_allow_html=True)
+        st.markdown("---")
+
+
+
+        # --- Live Voting Stats ---
+        st.markdown('### 📊 Live Voting Stats <span class="live-badge">● LIVE</span>', unsafe_allow_html=True)
+
+        total_voted = len(st.session_state.voted_emails)
+        total_voters = len(st.session_state.allowed_voters)
+        st.caption(f"🗳️ {total_voted} / {total_voters} voters have voted")
+
+        if total_voted > 0:
+            # Build voter name lookup
+            voter_name_map = {}
+            for v in st.session_state.allowed_voters:
+                voter_name_map[v["Email"].strip().lower()] = v["Name"].strip()
+
+            # Build table data — one row per pick (most recent first)
+            stats_rows = []
+            for email in st.session_state.voted_emails:
+                name = voter_name_map.get(email, email)
+                picks = st.session_state.voter_picks.get(email, [])
+                voted_time = st.session_state.vote_timestamps.get(email, "—")
+                for pick in picks:
+                    stats_rows.append({
+                        "Voter": name,
+                        "Email": email,
+                        "Voted For": pick,
+                        "Time": voted_time
+                    })
+
+            # Sort by time descending (most recent first)
+            stats_rows.sort(key=lambda r: r["Time"], reverse=True)
+
+            stats_df = pd.DataFrame(stats_rows)
+            st.dataframe(stats_df, use_container_width=True, hide_index=True, height=200)
+        else:
+            st.info("No votes yet.")
+
+        st.markdown("---")
+
+        # --- Customize Title & Subtitle ---
+        st.markdown("**✏️ Page Title & Subtitle**")
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            new_title = st.text_input("Title", value=st.session_state.app_title, key="edit_title")
+        with tc2:
+            new_subtitle = st.text_input("Subtitle", value=st.session_state.app_subtitle, key="edit_subtitle")
+        if st.button("💾 Save Title", use_container_width=False):
+            st.session_state.app_title = new_title
+            st.session_state.app_subtitle = new_subtitle
+            save_data()
+            st.success("✅ Title & Subtitle updated!")
+            st.rerun()
+
+        st.markdown("---")
+
+        # --- Upload CSVs side by side ---
+        st.markdown("### 📂 Upload CSV Files")
+        col_voter, col_contestant = st.columns(2)
+
+        with col_voter:
+            st.markdown("**📄 Voter List**")
+            st.caption("Columns: `Name`, `Email`")
+            uploaded_file = st.file_uploader("Upload Voter CSV", type=["csv"], label_visibility="collapsed")
+            if uploaded_file is not None:
+                try:
+                    df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
+                    df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+                    col_map = {col.lower(): col for col in df.columns}
+                    name_col = col_map.get("name", None)
+                    email_col = col_map.get("email", None)
+                    if name_col and email_col:
+                        voter_df = df[[name_col, email_col]].dropna().rename(columns={name_col: "Name", email_col: "Email"})
+                        st.session_state.allowed_voters = voter_df.to_dict("records")
+                        save_data()
+                        st.success(f"✅ {len(st.session_state.allowed_voters)} voters loaded")
+                    else:
+                        st.error(f"❌ Need 'Name' & 'Email' columns! Found: {list(df.columns)}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+        with col_contestant:
+            st.markdown("**🎭 Contestants**")
+            st.caption("Columns: `Number`, `Name`, `Photo`(URL)")
+            contestants_csv = st.file_uploader("Upload Contestants CSV", type=["csv"], key="contestants_csv", label_visibility="collapsed")
+            if contestants_csv is not None:
+                try:
+                    df = pd.read_csv(contestants_csv, sep=None, engine="python", encoding="utf-8-sig")
+                    df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+                    col_map = {col.lower(): col for col in df.columns}
+                    num_col = col_map.get("number", None)
+                    name_col = col_map.get("name", None)
+                    photo_col = col_map.get("photo", None)
+
+                    if num_col:
+                        df["Number"] = df[num_col].astype(str).str.strip()
+                        df["Name"] = df[name_col].astype(str).str.strip() if name_col else ""
+                        df["Photo"] = df[photo_col].astype(str).str.strip() if photo_col else ""
+                        df = df.fillna("")
+                        df["Name"] = df["Name"].replace("nan", "")
+                        df["Photo"] = df["Photo"].replace("nan", "")
+                        contestants_list = df[["Number", "Name", "Photo"]].to_dict("records")
+                        st.session_state.contestants = contestants_list
+                        st.session_state.votes = {get_contestant_label(c): 0 for c in contestants_list}
+                        st.session_state.voted_emails = set()
+                        save_data()
+                        st.success(f"✅ {len(contestants_list)} contestants loaded")
+                    else:
+                        st.error(f"❌ Need 'Number' column! Found: {list(df.columns)}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+        # Show loaded data summary
+        s1, s2 = st.columns(2)
+        with s1:
+            if len(st.session_state.allowed_voters) > 0:
+                st.caption(f"👥 {len(st.session_state.allowed_voters)} voters loaded")
+        with s2:
+            if len(st.session_state.contestants) > 0:
+                st.caption(f"🎭 {len(st.session_state.contestants)} contestants loaded")
+
+        st.markdown("---")
+
+
+        # --- Control Panel ---
+        st.markdown("**🔄 Control Panel**")
+        v1, v2, r1, r2 = st.columns([1, 1, 1, 1])
+        with v1:
+            if st.session_state.voting_open:
+                if st.button("Close Voting", use_container_width=True):
+                    st.session_state.voting_open = False
+                    save_data()
+                    st.rerun()
+            else:
+                if st.button("Open Voting", use_container_width=True):
+                    st.session_state.voting_open = True
+                    save_data()
+                    st.rerun()
+        with v2:
+            status = "🟢 Open" if st.session_state.voting_open else "🔴 Closed"
+            st.markdown(f"<p style='padding-top:8px; font-weight:600;'>{status}</p>", unsafe_allow_html=True)
+        with r1:
+            if st.button("Reset Votes", use_container_width=True):
+                st.session_state.votes = {get_contestant_label(c): 0 for c in st.session_state.contestants}
+                st.session_state.voted_emails = set()
+                st.session_state.voter_picks = {}
+                st.session_state.vote_timestamps = {}
+                save_data()
+                st.success("All votes reset!")
+                st.rerun()
+        with r2:
+            if st.button("Reset All", use_container_width=True):
+                st.session_state.votes = {get_contestant_label(c): 0 for c in st.session_state.contestants}
+                st.session_state.voted_emails = set()
+                st.session_state.voter_picks = {}
+                st.session_state.vote_timestamps = {}
+                st.session_state.contestants = []
+                st.session_state.allowed_voters = []
+                st.session_state.schedule_start = ""
+                st.session_state.schedule_end = ""
+                save_data()
+                st.success("Everything reset!")
+                st.rerun()
+
+        st.markdown("---")
+
+        # --- Vote Schedule ---
+        st.markdown("**📅 Vote Schedule**")
+        st.caption("Set start & end date/time — voting will auto open/close")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            start_date = st.date_input("Start Date", value=date.today(), key="sched_start_date")
+            start_time_str = st.text_input("Start Time (HH:MM)", value="09:00", key="sched_start_time")
+        with sc2:
+            end_date = st.date_input("End Date", value=date.today(), key="sched_end_date")
+            end_time_str = st.text_input("End Time (HH:MM)", value="18:00", key="sched_end_time")
+
+        btn1, btn2, _ = st.columns([1, 1, 2])
+        with btn1:
+            set_sched = st.button("Set", use_container_width=True)
+        with btn2:
+            clear_sched = st.button("Clear", use_container_width=True)
+
+        if set_sched:
+            try:
+                start_time_parsed = datetime.strptime(start_time_str.strip(), "%H:%M").time()
+                end_time_parsed = datetime.strptime(end_time_str.strip(), "%H:%M").time()
+            except ValueError:
+                st.error("❌ Invalid time format! Use HH:MM (e.g. 09:00, 14:30)")
+                st.stop()
+            start_dt = datetime.combine(start_date, start_time_parsed)
+            end_dt = datetime.combine(end_date, end_time_parsed)
+            if end_dt <= start_dt:
+                st.error("❌ End time must be after start time!")
+            else:
+                st.session_state.schedule_start = start_dt.isoformat()
+                st.session_state.schedule_end = end_dt.isoformat()
+                now = datetime.now()
+                if start_dt <= now <= end_dt:
+                    st.session_state.voting_open = True
+                else:
+                    st.session_state.voting_open = False
+                save_data()
+                st.success(f"✅ Scheduled: {start_dt.strftime('%d %b %Y, %I:%M %p')} — {end_dt.strftime('%d %b %Y, %I:%M %p')}")
+                st.rerun()
+
+        if st.session_state.schedule_start and st.session_state.schedule_end:
+            try:
+                s = datetime.fromisoformat(st.session_state.schedule_start)
+                e = datetime.fromisoformat(st.session_state.schedule_end)
+                st.caption(f"📆 Current: {s.strftime('%d %b %Y, %I:%M %p')} — {e.strftime('%d %b %Y, %I:%M %p')}")
+            except:
+                pass
+
+        if clear_sched:
+            st.session_state.schedule_start = ""
+            st.session_state.schedule_end = ""
+            save_data()
+            st.success("Schedule cleared!")
+            st.rerun()
+
+        # Auto-refresh admin panel every 5 seconds for live voting stats
+        st_autorefresh(interval=5000, limit=None, key="admin_live_refresh")
