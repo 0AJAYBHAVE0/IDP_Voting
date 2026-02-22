@@ -92,7 +92,7 @@ st.markdown("""
 [data-testid="collapsedControl"] { display: none; }
 section[data-testid="stSidebar"] { display: none; }
 
-/* Hide Fork, GitHub, Share, Deploy, Footer */
+/* Hide Fork, GitHub, Share, Deploy, Footer, Hosted badge */
 [data-testid="stToolbar"] { display: none !important; }
 .stDeployButton { display: none !important; }
 #MainMenu { visibility: hidden !important; }
@@ -105,7 +105,13 @@ footer { visibility: hidden !important; }
 a[href*="share.streamlit.io"] { display: none !important; }
 [data-testid="stHeader"] button { display: none !important; }
 iframe[src*="share.streamlit.io"] { display: none !important; }
-
+.viewerBadge_container__r5tak { display: none !important; }
+.viewerBadge_link__qRIco { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+._profileContainer_gzau3_53 { display: none !important; }
+div[class*="viewerBadge"] { display: none !important; }
+a[href*="streamlit.io/cloud"] { display: none !important; }
+div[class*="stAppViewBlockContainer"] > div:last-child a[href*="streamlit"] { display: none !important; }
 
 /* ===== PODIUM ===== */
 .podium-container {
@@ -727,6 +733,7 @@ elif current_page == "admin":
 
         # Auto-refresh admin panel every 5 seconds for live voting stats
         st_autorefresh(interval=5000, limit=None, key="admin_live_refresh")
+
 
 
 
