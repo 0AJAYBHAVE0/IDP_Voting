@@ -92,6 +92,14 @@ st.markdown("""
 [data-testid="collapsedControl"] { display: none; }
 section[data-testid="stSidebar"] { display: none; }
 
+/* Hide Fork button, GitHub icon, and footer */
+[data-testid="stToolbar"] { display: none !important; }
+.stDeployButton { display: none !important; }
+#MainMenu { visibility: hidden !important; }
+header[data-testid="stHeader"] { background: transparent !important; }
+footer { visibility: hidden !important; }
+[data-testid="manage-app-button"] { display: none !important; }
+
 /* ===== PODIUM ===== */
 .podium-container {
     display: flex;
@@ -712,4 +720,5 @@ elif current_page == "admin":
 
         # Auto-refresh admin panel every 5 seconds for live voting stats
         st_autorefresh(interval=5000, limit=None, key="admin_live_refresh")
+
 
