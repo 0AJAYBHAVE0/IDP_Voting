@@ -41,7 +41,7 @@ def get_contestant_label(c):
         return f"#{num} - {name}"
     return f"#{num}"
 
-st.set_page_config(page_title="Office Talent Show - Voting", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="IDP Got Talent Show - Voting", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
@@ -331,11 +331,11 @@ if current_page == "voting":
         if len(st.session_state.allowed_voters) == 0:
             st.warning("Voting is not open yet. Please check back later.")
         else:
-            login_email = st.text_input("📧 Enter Your Email")
+            login_email = st.text_input("📧 Enter Official Email")
 
             if st.button("Continue"):
                 if not login_email.strip():
-                    st.warning("Please enter your Email!")
+                    st.warning("Please enter official Email!")
                 else:
                     matched_voter = None
                     for v in st.session_state.allowed_voters:
@@ -712,3 +712,4 @@ elif current_page == "admin":
 
         # Auto-refresh admin panel every 5 seconds for live voting stats
         st_autorefresh(interval=5000, limit=None, key="admin_live_refresh")
+
