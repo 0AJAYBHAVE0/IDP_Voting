@@ -92,13 +92,20 @@ st.markdown("""
 [data-testid="collapsedControl"] { display: none; }
 section[data-testid="stSidebar"] { display: none; }
 
-/* Hide Fork button, GitHub icon, and footer */
+/* Hide Fork, GitHub, Share, Deploy, Footer */
 [data-testid="stToolbar"] { display: none !important; }
 .stDeployButton { display: none !important; }
 #MainMenu { visibility: hidden !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
 footer { visibility: hidden !important; }
 [data-testid="manage-app-button"] { display: none !important; }
+[data-testid="stStatusWidget"] { display: none !important; }
+.stAppDeployButton { display: none !important; }
+[data-testid="baseButton-headerNoPadding"] { display: none !important; }
+a[href*="share.streamlit.io"] { display: none !important; }
+[data-testid="stHeader"] button { display: none !important; }
+iframe[src*="share.streamlit.io"] { display: none !important; }
+
 
 /* ===== PODIUM ===== */
 .podium-container {
@@ -720,5 +727,6 @@ elif current_page == "admin":
 
         # Auto-refresh admin panel every 5 seconds for live voting stats
         st_autorefresh(interval=5000, limit=None, key="admin_live_refresh")
+
 
 
