@@ -1,38 +1,11 @@
-
 import streamlit as st
 import pandas as pd
+
 import json
 import os
 from datetime import datetime, date, time
 from streamlit_autorefresh import st_autorefresh
 from cryptography.fernet import Fernet
-
-# --- Mega integration ---
-try:
-    from mega import Mega
-except ImportError:
-    Mega = None
-
-def get_mega():
-    if Mega is None:
-        raise ImportError("mega.py is not installed. Run 'pip install mega.py'")
-    email = st.secrets["MEGA_EMAIL"]
-    password = st.secrets["MEGA_PASSWORD"]
-    mega = Mega()
-    m = mega.login(email, password)
-    return m
-
-def upload_to_mega(local_path, remote_name):
-    m = get_mega()
-    m.upload(local_path, dest_filename=remote_name)
-
-def download_from_mega(remote_name, local_path):
-    m = get_mega()
-    files = m.get_files()
-    for file_id, file_info in files.items():
-        if file_info['a']['n'] == remote_name:
-            m.download(file_info, dest_filename=local_path)
-            break
 
 KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voting_data.key")
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voting_data.json")
@@ -61,13 +34,6 @@ def decrypt_data(token: bytes) -> str:
 
 def load_data():
     """Load all data from encrypted JSON file"""
-    # Download latest files from Mega before loading
-    try:
-        download_from_mega("voting_data.json", DATA_FILE)
-        download_from_mega("voting_data.key", KEY_FILE)
-    except Exception as e:
-        # If download fails, continue with local files if present
-        pass
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
             encrypted = f.read()
@@ -107,12 +73,6 @@ def save_data():
     encrypted = encrypt_data(json_str)
     with open(DATA_FILE, "wb") as f:
         f.write(encrypted)
-    # Upload files to Mega after saving
-    try:
-        upload_to_mega(DATA_FILE, "voting_data.json")
-        upload_to_mega(KEY_FILE, "voting_data.key")
-    except Exception as e:
-        st.warning(f"Could not upload to Mega: {e}")
 
 
 def get_contestant_label(c):
