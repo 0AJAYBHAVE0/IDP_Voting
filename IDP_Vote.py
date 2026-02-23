@@ -1,23 +1,89 @@
+
 import streamlit as st
 import pandas as pd
 import json
 import os
 from datetime import datetime, date, time
 from streamlit_autorefresh import st_autorefresh
+from cryptography.fernet import Fernet
 
+# --- Mega integration ---
+try:
+    from mega import Mega
+except ImportError:
+    Mega = None
+
+def get_mega():
+    if Mega is None:
+        raise ImportError("mega.py is not installed. Run 'pip install mega.py'")
+    email = st.secrets["MEGA_EMAIL"]
+    password = st.secrets["MEGA_PASSWORD"]
+    mega = Mega()
+    m = mega.login(email, password)
+    return m
+
+def upload_to_mega(local_path, remote_name):
+    m = get_mega()
+    m.upload(local_path, dest_filename=remote_name)
+
+def download_from_mega(remote_name, local_path):
+    m = get_mega()
+    files = m.get_files()
+    for file_id, file_info in files.items():
+        if file_info['a']['n'] == remote_name:
+            m.download(file_info, dest_filename=local_path)
+            break
+
+KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voting_data.key")
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voting_data.json")
+
+def get_or_create_key():
+    """Get encryption key from file, or create it if not exists."""
+    if not os.path.exists(KEY_FILE):
+        key = Fernet.generate_key()
+        with open(KEY_FILE, "wb") as f:
+            f.write(key)
+    else:
+        with open(KEY_FILE, "rb") as f:
+            key = f.read()
+    return key
+
+def encrypt_data(data: str) -> bytes:
+    key = get_or_create_key()
+    f = Fernet(key)
+    return f.encrypt(data.encode("utf-8"))
+
+def decrypt_data(token: bytes) -> str:
+    key = get_or_create_key()
+    f = Fernet(key)
+    return f.decrypt(token).decode("utf-8")
 
 
 def load_data():
-    """Load all data from JSON file"""
+    """Load all data from encrypted JSON file"""
+    # Download latest files from Mega before loading
+    try:
+        download_from_mega("voting_data.json", DATA_FILE)
+        download_from_mega("voting_data.key", KEY_FILE)
+    except Exception as e:
+        # If download fails, continue with local files if present
+        pass
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(DATA_FILE, "rb") as f:
+            encrypted = f.read()
+        try:
+            decrypted = decrypt_data(encrypted)
+            data = json.loads(decrypted)
+            # Convert vote_changed_users to set if present
+            if "vote_changed_users" in data:
+                data["vote_changed_users"] = set(data["vote_changed_users"])
+            return data
+        except Exception:
+            return None
     return None
 
-
 def save_data():
-    """Save all data to JSON file"""
+    """Save all data to encrypted JSON file"""
     data = {
         "contestants": st.session_state.contestants,
         "votes": st.session_state.votes,
@@ -35,9 +101,18 @@ def save_data():
         "max_votes": st.session_state.max_votes,
         "show_live_results": st.session_state.show_live_results,
         "custom_message": st.session_state.custom_message,
+        "vote_changed_users": list(st.session_state.vote_changed_users),
     }
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    json_str = json.dumps(data, ensure_ascii=False, indent=2)
+    encrypted = encrypt_data(json_str)
+    with open(DATA_FILE, "wb") as f:
+        f.write(encrypted)
+    # Upload files to Mega after saving
+    try:
+        upload_to_mega(DATA_FILE, "voting_data.json")
+        upload_to_mega(KEY_FILE, "voting_data.key")
+    except Exception as e:
+        st.warning(f"Could not upload to Mega: {e}")
 
 
 def get_contestant_label(c):
@@ -213,6 +288,11 @@ section[data-testid="stSidebar"] { display: none; }
     unsafe_allow_html=True,
 )
 saved = load_data()
+if "vote_changed_users" not in st.session_state:
+    if saved and "vote_changed_users" in saved:
+        st.session_state.vote_changed_users = set(saved["vote_changed_users"])
+    else:
+        st.session_state.vote_changed_users = set()
 if "contestants" not in st.session_state:
     st.session_state.contestants = (
         saved["contestants"]
@@ -411,6 +491,11 @@ if current_page == "voting":
     else:
         st.success(f"✅ Welcome, **{st.session_state.voter_name}**!")
         already_voted = st.session_state.voter_email in st.session_state.voted_emails
+        vote_changed_users = st.session_state.vote_changed_users
+        can_edit_vote = (
+            st.session_state.allow_vote_change
+            and st.session_state.voter_email not in vote_changed_users
+        )
         if already_voted and not st.session_state.allow_vote_change:
             my_picks = st.session_state.voter_picks.get(
                 st.session_state.voter_email, []
@@ -421,15 +506,22 @@ if current_page == "voting":
                 )
             else:
                 st.info("✅ You have already voted. Thank you!")
+        elif already_voted and st.session_state.allow_vote_change and st.session_state.voter_email in vote_changed_users:
+            my_picks = st.session_state.voter_picks.get(
+                st.session_state.voter_email, []
+            )
+            st.success(
+                f"✏️ You have already changed your vote once. Your final vote: {', '.join(my_picks)}"
+            )
         elif len(contestants) == 0:
             st.info("No contestants added yet.")
         else:
-            if already_voted and st.session_state.allow_vote_change:
+            if already_voted and can_edit_vote:
                 my_picks = st.session_state.voter_picks.get(
                     st.session_state.voter_email, []
                 )
                 st.info(
-                    f"✏️ Vote edit is enabled. Your current vote: **{', '.join(my_picks)}**. You can change it below."
+                    f"✏️ Vote edit is enabled. Your current vote: **{', '.join(my_picks)}**. You can change it below. (You can only change your vote once.)"
                 )
             if st.session_state.custom_message:
                 st.info(st.session_state.custom_message, icon="📢")
@@ -464,7 +556,7 @@ if current_page == "voting":
                 unsafe_allow_html=True,
             )
             default_picks = []
-            if already_voted and st.session_state.allow_vote_change:
+            if already_voted and can_edit_vote:
                 prev = st.session_state.voter_picks.get(
                     st.session_state.voter_email, []
                 )
@@ -473,19 +565,18 @@ if current_page == "voting":
                 "Choose your favourites:",
                 options=contestant_labels,
                 default=default_picks,
-                max_selections=st.session_state.max_votes,
                 key="vote_select",
             )
             btn_label = "✅ Update Vote" if already_voted else "✅ Submit"
             if st.button(btn_label):
-                if len(selected) == 0:
-                    st.warning("Please select at least 1 performer!")
+                if len(selected) < st.session_state.max_votes:
+                    st.warning(f"Please select exactly {st.session_state.max_votes} performers!")
                 elif len(selected) > st.session_state.max_votes:
                     st.error(
                         f"You can vote for maximum {st.session_state.max_votes} performers!"
                     )
                 else:
-                    if already_voted and st.session_state.allow_vote_change:
+                    if already_voted and can_edit_vote:
                         old_picks = st.session_state.voter_picks.get(
                             st.session_state.voter_email, []
                         )
@@ -495,6 +586,8 @@ if current_page == "voting":
                                 and st.session_state.votes[old_pick] > 0
                             ):
                                 st.session_state.votes[old_pick] -= 1
+                        # Mark this user as having changed their vote once
+                        st.session_state.vote_changed_users.add(st.session_state.voter_email)
                     for pick in selected:
                         st.session_state.votes[pick] = (
                             st.session_state.votes.get(pick, 0) + 1
@@ -551,17 +644,15 @@ if current_page == "voting":
                 st.markdown(podium_html, unsafe_allow_html=True)
             st.markdown("")
             st.markdown("### Top 5 Scoreboard")
-            top5_labels = sorted_labels[:5]
-            top5_counts = sorted_counts[:5]
-            max_count = max(top5_counts) if top5_counts else 1
+            # Only show contestants with at least 1 vote, up to 5 max
+            voted_contestants = [(lbl, cnt) for lbl, cnt in zip(sorted_labels, sorted_counts) if cnt > 0]
+            top5_voted = voted_contestants[:5]
+            max_count = max([cnt for _, cnt in top5_voted]) if top5_voted else 1
             rank_icons = {0: "🥇", 1: "🥈", 2: "🥉", 3: "🥉", 4: "🥉"}
-            for i, (lbl, cnt) in enumerate(zip(top5_labels, top5_counts)):
+            for i, (lbl, cnt) in enumerate(top5_voted):
                 pct = int((cnt / max_count) * 100) if max_count > 0 else 0
                 pct_total = int((cnt / total_votes) * 100) if total_votes > 0 else 0
-                if cnt > 0:
-                    icon = rank_icons.get(i, f"#{i+1}")
-                else:
-                    icon = f"#{i+1}"
+                icon = rank_icons.get(i, f"#{i+1}")
                 bar_html = f"""
                 <div class="results-bar-container">
                     <div class="results-bar-header">
@@ -586,7 +677,7 @@ elif current_page == "admin":
     st.markdown("---")
     if not st.session_state.admin_logged_in:
         pwd = st.text_input("Enter Admin Password", type="password")
-        if st.button("🔓 Login"):
+        if st.button("🔒 Login"):
             if pwd == st.session_state.admin_password:
                 st.session_state.admin_logged_in = True
                 st.rerun()
@@ -707,32 +798,66 @@ elif current_page == "admin":
                     st.session_state.allow_vote_change = True
                     save_data()
                     st.rerun()
+        # --- Inline password for Reset Votes ---
         with r1:
+            if 'show_reset_votes_pwd' not in st.session_state:
+                st.session_state.show_reset_votes_pwd = False
             if st.button("Reset Votes", use_container_width=True):
-                st.session_state.votes = {
-                    get_contestant_label(c): 0 for c in st.session_state.contestants
-                }
-                st.session_state.voted_emails = set()
-                st.session_state.voter_picks = {}
-                st.session_state.vote_timestamps = {}
-                save_data()
-                st.success("All votes reset!")
-                st.rerun()
+                st.session_state.show_reset_votes_pwd = True
+            if st.session_state.show_reset_votes_pwd:
+                reset_votes_pwd = st.text_input("Admin Password", type="password", key="reset_votes_pwd_inline")
+                col1, col2 = st.columns([1,1])
+                with col1:
+                    if st.button("Reset", key="confirm_reset_votes_btn_inline"):
+                        if reset_votes_pwd != st.session_state.admin_password:
+                            st.error("❌ Incorrect admin password!")
+                        else:
+                            st.session_state.votes = {
+                                get_contestant_label(c): 0 for c in st.session_state.contestants
+                            }
+                            st.session_state.voted_emails = set()
+                            st.session_state.voter_picks = {}
+                            st.session_state.vote_timestamps = {}
+                            save_data()
+                            st.success("All votes reset!")
+                            st.session_state.show_reset_votes_pwd = False
+                            st.rerun()
+                with col2:
+                    if st.button("Cancel", key="cancel_reset_votes_btn_inline"):
+                        st.session_state.show_reset_votes_pwd = False
+                        st.rerun()
+        # --- Inline password for Reset All ---
         with r2:
+            if 'show_reset_all_pwd' not in st.session_state:
+                st.session_state.show_reset_all_pwd = False
             if st.button("Reset All", use_container_width=True):
-                st.session_state.votes = {
-                    get_contestant_label(c): 0 for c in st.session_state.contestants
-                }
-                st.session_state.voted_emails = set()
-                st.session_state.voter_picks = {}
-                st.session_state.vote_timestamps = {}
-                st.session_state.contestants = []
-                st.session_state.allowed_voters = []
-                st.session_state.schedule_start = ""
-                st.session_state.schedule_end = ""
-                save_data()
-                st.success("Everything reset!")
-                st.rerun()
+                st.session_state.show_reset_all_pwd = True
+            if st.session_state.show_reset_all_pwd:
+                reset_all_pwd = st.text_input("Admin Password", type="password", key="reset_all_pwd_inline")
+                col1, col2 = st.columns([1,1])
+                with col1:
+                    if st.button("Reset All", key="confirm_reset_all_btn_inline"):
+                        if reset_all_pwd != st.session_state.admin_password:
+                            st.error("❌ Incorrect admin password!")
+                        else:
+                            st.session_state.votes = {
+                                get_contestant_label(c): 0 for c in st.session_state.contestants
+                            }
+                            st.session_state.voted_emails = set()
+                            st.session_state.voter_picks = {}
+                            st.session_state.vote_timestamps = {}
+                            st.session_state.contestants = []
+                            st.session_state.allowed_voters = []
+                            st.session_state.schedule_start = ""
+                            st.session_state.schedule_end = ""
+                            save_data()
+                            st.success("Everything reset!")
+                            st.session_state.show_reset_all_pwd = False
+                            st.rerun()
+                with col2:
+                    if st.button("Cancel", key="cancel_reset_all_btn_inline"):
+                        st.session_state.show_reset_all_pwd = False
+                        st.rerun()
         st.markdown("---")
 
         def save_advanced_settings():
@@ -766,20 +891,26 @@ elif current_page == "admin":
             )
         with st.expander("✏️ Page Title & Subtitle", expanded=False):
             tc1, tc2 = st.columns(2)
+            def update_title():
+                st.session_state.app_title = st.session_state.edit_title
+                save_data()
+            def update_subtitle():
+                st.session_state.app_subtitle = st.session_state.edit_subtitle
+                save_data()
             with tc1:
-                new_title = st.text_input(
-                    "Title", value=st.session_state.app_title, key="edit_title"
+                st.text_input(
+                    "Title",
+                    value=st.session_state.app_title,
+                    key="edit_title",
+                    on_change=update_title,
                 )
             with tc2:
-                new_subtitle = st.text_input(
-                    "Subtitle", value=st.session_state.app_subtitle, key="edit_subtitle"
+                st.text_input(
+                    "Subtitle",
+                    value=st.session_state.app_subtitle,
+                    key="edit_subtitle",
+                    on_change=update_subtitle,
                 )
-            if st.button("💾 Save Title", use_container_width=False):
-                st.session_state.app_title = new_title
-                st.session_state.app_subtitle = new_subtitle
-                save_data()
-                st.success("✅ Title & Subtitle updated!")
-                st.rerun()
         with st.expander("📂 Upload CSV Files", expanded=False):
             col_voter, col_contestant = st.columns(2)
             with col_voter:
